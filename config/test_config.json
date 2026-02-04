@@ -42,5 +42,25 @@
     "If true, then all resources created by test scripts will be removed.",
     "Default - true."
   ],
-  "remove_test_resources": true
+  "remove_test_resources": true,
+  "include_table_like_description": [
+    "Only tables, that match this LIKE pattern, will be migrated.",
+    "Default - ''."
+  ],
+  "include_table_like": "hello%",
+  "exclude_table_like_description": [
+    "Tables, that match this LIKE pattern, will be excluded from migration.",
+    "Default - ''."
+  ],
+  "exclude_table_like": "world%",
+  "limit_description": [
+    "Limit the number of tables to migrate.",
+    "Default - 0 (no limit)."
+  ],
+  "limit": 1000,
+  "offset_description": [
+    "Offset the number of tables to migrate.",
+    "Default - 0."
+  ],
+  "offset": 0
 }

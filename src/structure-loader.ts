@@ -71,14 +71,15 @@ export default async (conversion: Conversion): Promise<Conversion> => {
   const logTitle = 'StructureLoader::default';
   await setMySqlVersion(conversion);
   const haveTablesLoaded: boolean = await migrationStateManager.get(conversion, 'tables_loaded');
-  let sql = `SHOW FULL TABLES IN \`${conversion._mySqlDbName}\` WHERE 1 = 1`;
+  let sql = `SELECT TABLE_NAME as 'Tables_in_${conversion._mySqlDbName}', TABLE_TYPE as 'Table_type' FROM information_schema.TABLES WHERE 
+    TABLE_SCHEMA = '${conversion._mySqlDbName}'`;
 
   if (conversion._includeTables.length !== 0) {
     const tablesToInclude: string = conversion._includeTables
       .map((table: string): string => `'${table}'`)
       .join(',');
 
-    sql += ` AND \`Tables_in_${conversion._mySqlDbName}\` IN (${tablesToInclude})`;
+    sql += ` AND TABLE_NAME IN (${tablesToInclude})`;
   }
 
   if (conversion._excludeTables.length !== 0) {
@@ -86,7 +87,18 @@ export default async (conversion: Conversion): Promise<Conversion> => {
       .map((table: string): string => `'${table}'`)
       .join(',');
 
-    sql += ` AND \`Tables_in_${conversion._mySqlDbName}\` NOT IN (${tablesToExclude})`;
+    sql += ` AND TABLE_NAME NOT IN (${tablesToExclude})`;
+  }
+
+  if (conversion._excludeTableLike !== '') {
+    sql += ` AND TABLE_NAME NOT LIKE '${conversion._excludeTableLike}'`;
+  }
+  if (conversion._includeTableLike !== '') {
+    sql += ` AND TABLE_NAME LIKE '${conversion._includeTableLike}'`;
+  }
+
+  if (conversion._limit > 0) {
+    sql += ` LIMIT ${conversion._limit} OFFSET ${conversion._offset}`;
   }
 
   const params: DBAccessQueryParams = {

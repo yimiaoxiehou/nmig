@@ -109,6 +109,20 @@ export default class Conversion {
   public readonly _excludeTables: string[];
 
   /**
+   * List of tables excluded by LIKE pattern, that will not be migrated.
+   */
+  public readonly _excludeTableLike: string;
+
+  /**
+   * List of tables included by LIKE pattern, that will not be migrated.
+   */
+  public readonly _includeTableLike: string;
+
+  public readonly _limit: number;
+  public readonly _offset: number;
+
+
+  /**
    * List of tables, that will be migrated.
    */
   public readonly _includeTables: string[];
@@ -233,6 +247,10 @@ export default class Conversion {
     this._errorLogsPath = path.join(this._logsDirPath, 'errors-only.log');
     this._notCreatedViewsPath = path.join(this._logsDirPath, 'not_created_views');
     this._excludeTables = this._config.exclude_tables || [];
+    this._excludeTableLike = this._config.exclude_table_like || '';
+    this._includeTableLike = this._config.include_table_like || '';
+    this._limit = this._config.limit || 0;
+    this._offset = this._config.offset || 0;
     this._includeTables = this._config.include_tables || [];
     this._timeBegin = new Date();
     this._encoding = this._config.encoding || 'utf8';
