@@ -61,7 +61,7 @@ const initializeConversion = async (): Promise<Conversion> => {
  * Resolves table-subtasks parallelism level.
  */
 const getTableSubtasksConcurrency = (conversion: Conversion): number => {
-  const configuredValue = conversion._numberOfSimultaneouslyRunningReaderProcesses;
+  const configuredValue = conversion._numberOfSimultaneouslyRunningTableSubtasks;
   const defaultConcurrency = 2;
   const maxConfiguredConcurrency =
     configuredValue === 'DEFAULT' ? defaultConcurrency : (configuredValue as number);
