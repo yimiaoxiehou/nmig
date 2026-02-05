@@ -18,6 +18,8 @@
  *
  * @author Anatoly Khaytovich <anatolyuss@gmail.com>
  */
+import * as os from 'node:os';
+
 import DbAccess from './db-access';
 import { log } from './fs-ops';
 import Conversion from './conversion';
@@ -26,6 +28,11 @@ import prepareDataChunks from './data-chunks-processor';
 import * as migrationStateManager from './migration-state-manager';
 import * as extraConfigProcessor from './extra-config-processor';
 import { DBAccessQueryParams, DBAccessQueryResult, DBVendors } from './types';
+
+type SourceRelation = {
+  relationName: string;
+  relationType: string;
+};
 
 /**
  * Processes current table before data loading.
@@ -37,6 +44,64 @@ const processTableBeforeDataLoading = async (
 ): Promise<void> => {
   await createTable(conversion, tableName);
   await prepareDataChunks(conversion, tableName, stateLog);
+};
+
+/**
+ * Resolves table-subtasks parallelism level.
+ * Number is limited by configured DB pools and available CPU cores.
+ */
+const getTableSubtasksConcurrency = (conversion: Conversion, tablesCnt: number): number => {
+  const configuredValue = conversion._numberOfSimultaneouslyRunningReaderProcesses;
+  const defaultConcurrency = 2;
+  const maxConfiguredConcurrency =
+    configuredValue === 'DEFAULT' ? defaultConcurrency : (configuredValue as number);
+
+  return Math.max(
+    1,
+    Math.min(
+      os.cpus().length || 1,
+      conversion._maxEachDbConnectionPoolSize,
+      maxConfiguredConcurrency,
+      tablesCnt,
+    ),
+  );
+};
+
+/**
+ * Executes table subtasks (create table + prepare data chunk) with bounded concurrency.
+ */
+const processTablesAsSubtasks = async (
+  conversion: Conversion,
+  tableNames: string[],
+  haveTablesLoaded: boolean,
+): Promise<void> => {
+  const queue: string[] = [...tableNames];
+  const workersCnt = getTableSubtasksConcurrency(conversion, tableNames.length);
+  const logTitle = 'StructureLoader::processTablesAsSubtasks';
+
+  await log(
+    conversion,
+    `\t--[${logTitle}] Running per-table subtasks with concurrency: ${workersCnt}`,
+  );
+
+  const worker = async (): Promise<void> => {
+    while (queue.length !== 0) {
+      const tableName = queue.shift();
+
+      if (!tableName) {
+        return;
+      }
+
+      await processTableBeforeDataLoading(conversion, tableName, haveTablesLoaded);
+    }
+  };
+
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < workersCnt; ++i) {
+    workers.push(worker());
+  }
+
+  await Promise.all(workers);
 };
 
 /**
@@ -111,14 +176,21 @@ export default async (conversion: Conversion): Promise<Conversion> => {
   };
 
   const result: DBAccessQueryResult = await DbAccess.query(params);
-  let tablesCnt = 0;
+  const sourceRelations: SourceRelation[] = result.data.map((row: any) => ({
+    relationName: row[`Tables_in_${conversion._mySqlDbName}`],
+    relationType: row.Table_type,
+  }));
+
+  const tablesToProcess: string[] = [];
   let viewsCnt = 0;
-  const processTablePromises: Promise<void>[] = [];
 
-  result.data.forEach((row: any) => {
-    let relationName: string = row[`Tables_in_${conversion._mySqlDbName}`];
+  sourceRelations.forEach((relation: SourceRelation) => {
+    let relationName: string = relation.relationName;
 
-    if (row.Table_type === 'BASE TABLE' && conversion._excludeTables.indexOf(relationName) === -1) {
+    if (
+      relation.relationType === 'BASE TABLE' &&
+      conversion._excludeTables.indexOf(relationName) === -1
+    ) {
       relationName = extraConfigProcessor.getTableName(conversion, relationName, false);
       conversion._tablesToMigrate.push(relationName);
 
@@ -127,22 +199,19 @@ export default async (conversion: Conversion): Promise<Conversion> => {
         arrTableColumns: [],
       });
 
-      processTablePromises.push(
-        processTableBeforeDataLoading(conversion, relationName, haveTablesLoaded),
-      );
-      tablesCnt++;
-    } else if (row.Table_type === 'VIEW') {
+      tablesToProcess.push(relationName);
+    } else if (relation.relationType === 'VIEW') {
       conversion._viewsToMigrate.push(relationName);
       viewsCnt++;
     }
   });
 
   const message = `\t--[${logTitle}] Source DB structure is loaded...\n
-        \t--[${logTitle}] Tables to migrate: ${tablesCnt}\n
+        \t--[${logTitle}] Tables to migrate: ${tablesToProcess.length}\n
         \t--[${logTitle}] Views to migrate: ${viewsCnt}`;
 
   await log(conversion, message);
-  await Promise.all(processTablePromises);
+  await processTablesAsSubtasks(conversion, tablesToProcess, haveTablesLoaded);
   await migrationStateManager.set(conversion, 'tables_loaded');
   return conversion;
 };
