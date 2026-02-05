@@ -27,6 +27,25 @@ import { DBAccessQueryParams, DBAccessQueryResult, DBVendors } from './types';
 
 export default class DbAccess {
   /**
+   * Default timeout for obtaining a PostgreSQL pool client.
+   */
+  private static readonly DEFAULT_PG_CONNECTION_TIMEOUT_MS = 30000;
+
+  /**
+   * Resolves configured timeout for PostgreSQL pool client acquisition.
+   */
+  private static _getPgConnectionTimeoutMs = (conversion: Conversion): number => {
+    const timeoutCandidate: any =
+      conversion?._extraConfig?.pg_connection_timeout_ms ??
+      conversion?._targetConString?.connectionTimeoutMillis;
+
+    const timeout: number = Number(timeoutCandidate);
+    return Number.isFinite(timeout) && timeout > 0
+      ? timeout
+      : DbAccess.DEFAULT_PG_CONNECTION_TIMEOUT_MS;
+  };
+
+  /**
    * Ensures MySQL connection pool existence.
    */
   private static _getMysqlConnection = async (conversion: Conversion): Promise<void> => {
@@ -54,6 +73,8 @@ export default class DbAccess {
   private static _getPgConnection = async (conversion: Conversion): Promise<void> => {
     if (!conversion._pg) {
       conversion._targetConString.max = conversion._maxEachDbConnectionPoolSize;
+      conversion._targetConString.connectionTimeoutMillis =
+        DbAccess._getPgConnectionTimeoutMs(conversion);
       const pool: PgPool = new PgPool(conversion._targetConString);
 
       if (!pool) {
@@ -130,7 +151,19 @@ export default class DbAccess {
    */
   public static getPgClient = async (conversion: Conversion): Promise<PoolClient> => {
     await DbAccess._getPgConnection(conversion);
-    return await (conversion._pg as PgPool).connect();
+
+    try {
+      return await (conversion._pg as PgPool).connect();
+    } catch (error) {
+      const pool: PgPool = conversion._pg as PgPool;
+      await generateError(
+        conversion,
+        `	--[DbAccess::getPgClient] ${error}; pool(total=${pool.totalCount}, idle=${pool.idleCount}, waiting=${pool.waitingCount}).` +
+          ' This may indicate that some workers are not releasing PostgreSQL clients.',
+      );
+
+      throw error;
+    }
   };
 
   /**
