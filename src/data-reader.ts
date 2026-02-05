@@ -72,6 +72,56 @@ process.on('message', async (signal: MessageToDataReader): Promise<void> => {
 /**
  * Initializes data transfer for the table, related to given "chunk".
  */
+
+/**
+ * Attaches periodic progress logging for streaming data transfer.
+ */
+const attachProgressLogger = (
+  conv: Conversion,
+  tableName: string,
+  rowsCnt: number,
+  dataReaderStream: Readable,
+): void => {
+  let processedRows = 0;
+  let timer: NodeJS.Timeout | null = null;
+  let timerDelay: NodeJS.Timeout | null = null;
+
+  const logProgress = (): void => {
+    const progress = rowsCnt > 0 ? Math.min(100, Math.floor((processedRows * 100) / rowsCnt)) : 0;
+    void log(
+      conv,
+      `	--[NMIG loadData] Progress for "${conv._schema}"."${tableName}": ${processedRows}/${rowsCnt} rows (${progress}%)`,
+    );
+  };
+
+  const clearProgressTimer = (): void => {
+    if (timerDelay !== null) {
+      clearTimeout(timerDelay);
+      timerDelay = null;
+    }
+
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  dataReaderStream.once('end', clearProgressTimer);
+  dataReaderStream.once('close', clearProgressTimer);
+  dataReaderStream.once('error', clearProgressTimer);
+
+  timerDelay = setTimeout((): void => {
+    logProgress();
+    timer = setInterval(logProgress, 5000);
+    timer.unref();
+  }, 30000);
+  timerDelay.unref();
+
+  dataReaderStream.on('data', (): void => {
+    processedRows++;
+  });
+};
+
 const populateTable = async (conv: Conversion, chunk: any): Promise<void> => {
   const tableName: string = chunk._tableName;
   const strSelectFieldList: string = chunk._selectFieldList;
@@ -118,6 +168,8 @@ const populateTable = async (conv: Conversion, chunk: any): Promise<void> => {
   const dataReaderStream: Readable = mysqlClient
     .query(sql)
     .stream({ highWaterMark: conv._streamsHighWaterMark });
+
+  attachProgressLogger(conv, tableName, rowsCnt, dataReaderStream);
 
   try {
     await streamPromises.pipeline(dataReaderStream, json2csvStream, dataWriter.stdin as Writable);
