@@ -31,7 +31,7 @@ import { dropDataPoolTable } from './data-pool-manager';
 import { processConstraints } from './constraints-processor';
 import { getConfAndLogsPaths, boot } from './boot-processor';
 import { createStateLogsTable, dropStateLogsTable } from './migration-state-manager';
-import { createDataPoolTable, readDataPool } from './data-pool-manager';
+import { createDataPoolTable, readDataPool, isDataPoolTableNotEmpty } from './data-pool-manager';
 import { createTable } from './table-processor';
 import prepareDataChunks from './data-chunks-processor';
 import * as migrationStateManager from './migration-state-manager';
@@ -84,8 +84,9 @@ const processTableBeforeDataLoading = async (
   conversion: Conversion,
   tableName: string,
   haveDataChunksProcessed: boolean,
+  skipPgTableCreation: boolean,
 ): Promise<void> => {
-  await createTable(conversion, tableName);
+  await createTable(conversion, tableName, skipPgTableCreation);
   await prepareDataChunks(conversion, tableName, haveDataChunksProcessed);
 };
 
@@ -105,6 +106,16 @@ const runMigration = async (): Promise<void> => {
     // Explicit per-table stage (managed by main.ts):
     // for each table execute "createTable + prepareDataChunks" with bounded concurrency.
     const haveTablesLoaded: boolean = await migrationStateManager.get(conversion, 'tables_loaded');
+    const dataPoolTableNotEmpty: boolean = await isDataPoolTableNotEmpty(conversion);
+    const haveDataChunksProcessed: boolean = haveTablesLoaded || dataPoolTableNotEmpty;
+    const skipPgTableCreation: boolean = dataPoolTableNotEmpty;
+
+    if (dataPoolTableNotEmpty) {
+      await log(
+        conversion,
+        '	--[Main] Skip CREATE TABLE stage because data-pool table already contains records.',
+      );
+    }
 
     if (conversion._tablesToMigrate.length !== 0) {
       const workersCnt = getTableSubtasksConcurrency(conversion);
@@ -122,7 +133,12 @@ const runMigration = async (): Promise<void> => {
             return;
           }
 
-          await processTableBeforeDataLoading(conversion, tableName, haveTablesLoaded);
+          await processTableBeforeDataLoading(
+            conversion,
+            tableName,
+            haveDataChunksProcessed,
+            skipPgTableCreation,
+          );
         }
       };
 
