@@ -18,6 +18,8 @@
  *
  * @author Anatoly Khaytovich <anatolyuss@gmail.com>
  */
+import * as os from 'node:os';
+
 import Conversion from './conversion';
 import createSchema from './schema-processor';
 import loadStructureToMigrate from './structure-loader';
@@ -30,6 +32,10 @@ import { processConstraints } from './constraints-processor';
 import { getConfAndLogsPaths, boot } from './boot-processor';
 import { createStateLogsTable, dropStateLogsTable } from './migration-state-manager';
 import { createDataPoolTable, readDataPool } from './data-pool-manager';
+import { createTable } from './table-processor';
+import prepareDataChunks from './data-chunks-processor';
+import * as migrationStateManager from './migration-state-manager';
+import { log } from './fs-ops';
 import {
   readConfig,
   readExtraConfig,
@@ -52,6 +58,78 @@ const initializeConversion = async (): Promise<Conversion> => {
 };
 
 /**
+ * Resolves table-subtasks parallelism level.
+ */
+const getTableSubtasksConcurrency = (conversion: Conversion): number => {
+  const configuredValue = conversion._numberOfSimultaneouslyRunningReaderProcesses;
+  const defaultConcurrency = 2;
+  const maxConfiguredConcurrency =
+    configuredValue === 'DEFAULT' ? defaultConcurrency : (configuredValue as number);
+
+  return Math.max(
+    1,
+    Math.min(
+      os.cpus().length || 1,
+      conversion._maxEachDbConnectionPoolSize,
+      maxConfiguredConcurrency,
+      conversion._tablesToMigrate.length,
+    ),
+  );
+};
+
+/**
+ * Processes current table before data loading.
+ */
+const processTableBeforeDataLoading = async (
+  conversion: Conversion,
+  tableName: string,
+  haveDataChunksProcessed: boolean,
+): Promise<void> => {
+  await createTable(conversion, tableName);
+  await prepareDataChunks(conversion, tableName, haveDataChunksProcessed);
+};
+
+/**
+ * Main flow orchestrates per-table concurrent subtasks.
+ */
+const runTableSubtasks = async (conversion: Conversion): Promise<Conversion> => {
+  const haveTablesLoaded: boolean = await migrationStateManager.get(conversion, 'tables_loaded');
+
+  if (conversion._tablesToMigrate.length === 0) {
+    await migrationStateManager.set(conversion, 'tables_loaded');
+    return conversion;
+  }
+
+  const workersCnt = getTableSubtasksConcurrency(conversion);
+  await log(
+    conversion,
+    `\t--[Main::runTableSubtasks] Running per-table subtasks with concurrency: ${workersCnt}`,
+  );
+
+  const queue: string[] = [...conversion._tablesToMigrate];
+  const worker = async (): Promise<void> => {
+    while (queue.length !== 0) {
+      const tableName: string | undefined = queue.shift();
+
+      if (!tableName) {
+        return;
+      }
+
+      await processTableBeforeDataLoading(conversion, tableName, haveTablesLoaded);
+    }
+  };
+
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < workersCnt; ++i) {
+    workers.push(worker());
+  }
+
+  await Promise.all(workers);
+  await migrationStateManager.set(conversion, 'tables_loaded');
+  return conversion;
+};
+
+/**
  * Runs NMIG migration pipeline in a sequential and explicit way.
  */
 const runMigration = async (): Promise<void> => {
@@ -63,6 +141,7 @@ const runMigration = async (): Promise<void> => {
     conversion = await createStateLogsTable(conversion);
     conversion = await createDataPoolTable(conversion);
     conversion = await loadStructureToMigrate(conversion);
+    conversion = await runTableSubtasks(conversion);
     conversion = await readDataPool(conversion);
     conversion = await DataPipeManager.runDataPipe(conversion);
     conversion = await decodeBinaryData(conversion);
