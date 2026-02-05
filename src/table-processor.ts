@@ -94,7 +94,11 @@ export const mapDataTypes = (objDataTypesMap: any, mySqlDataType: string): strin
 /**
  * Migrates structure of a single table to PostgreSql server.
  */
-export const createTable = async (conversion: Conversion, tableName: string): Promise<void> => {
+export const createTable = async (
+  conversion: Conversion,
+  tableName: string,
+  skipPgTableCreation: boolean = false, // eslint-disable-line @typescript-eslint/no-inferrable-types
+): Promise<void> => {
   const logTitle = 'TableProcessor::createTable';
   await log(
     conversion,
@@ -121,6 +125,15 @@ export const createTable = async (conversion: Conversion, tableName: string): Pr
   (conversion._dicTables.get(tableName) as Table).arrTableColumns = columns.data;
 
   if (conversion.shouldMigrateOnlyData()) {
+    return;
+  }
+
+  if (skipPgTableCreation) {
+    await log(
+      conversion,
+      `	--[${logTitle}] Skip create table due to non-empty data-pool: "${conversion._schema}"."${tableName}"`,
+      (conversion._dicTables.get(tableName) as Table).tableLogPath,
+    );
     return;
   }
 

@@ -71,6 +71,24 @@ export const dropDataPoolTable = async (conversion: Conversion): Promise<Convers
   return conversion;
 };
 
+
+/**
+ * Checks if data-pool table contains records.
+ */
+export const isDataPoolTableNotEmpty = async (conversion: Conversion): Promise<boolean> => {
+  const params: DBAccessQueryParams = {
+    conversion: conversion,
+    caller: 'DataPoolManager::isDataPoolTableNotEmpty',
+    sql: `SELECT COUNT(1) AS cnt FROM ${getDataPoolTableName(conversion)};`,
+    vendor: DBVendors.PG,
+    processExitOnError: true,
+    shouldReturnClient: false,
+  };
+
+  const result: DBAccessQueryResult = await DbAccess.query(params);
+  return +result.data.rows[0].cnt > 0;
+};
+
 /**
  * Reads temporary table, and generates Data-pool.
  */

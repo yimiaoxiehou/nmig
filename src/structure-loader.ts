@@ -21,23 +21,8 @@
 import DbAccess from './db-access';
 import { log } from './fs-ops';
 import Conversion from './conversion';
-import { createTable } from './table-processor';
-import prepareDataChunks from './data-chunks-processor';
-import * as migrationStateManager from './migration-state-manager';
 import * as extraConfigProcessor from './extra-config-processor';
 import { DBAccessQueryParams, DBAccessQueryResult, DBVendors } from './types';
-
-/**
- * Processes current table before data loading.
- */
-const processTableBeforeDataLoading = async (
-  conversion: Conversion,
-  tableName: string,
-  stateLog: boolean,
-): Promise<void> => {
-  await createTable(conversion, tableName);
-  await prepareDataChunks(conversion, tableName, stateLog);
-};
 
 /**
  * Retrieves the source db (MySQL) version.
@@ -65,12 +50,12 @@ const setMySqlVersion = async (conversion: Conversion): Promise<void> => {
 };
 
 /**
- * Loads source tables and views, that need to be migrated.
+ * Loads source tables and views metadata, that need to be migrated.
+ * Note, table processing subtasks are orchestrated by main.ts.
  */
 export default async (conversion: Conversion): Promise<Conversion> => {
   const logTitle = 'StructureLoader::default';
   await setMySqlVersion(conversion);
-  const haveTablesLoaded: boolean = await migrationStateManager.get(conversion, 'tables_loaded');
   let sql = `SELECT TABLE_NAME as 'Tables_in_${conversion._mySqlDbName}', TABLE_TYPE as 'Table_type' FROM information_schema.TABLES WHERE 
     TABLE_SCHEMA = '${conversion._mySqlDbName}'`;
 
@@ -113,7 +98,6 @@ export default async (conversion: Conversion): Promise<Conversion> => {
   const result: DBAccessQueryResult = await DbAccess.query(params);
   let tablesCnt = 0;
   let viewsCnt = 0;
-  const processTablePromises: Promise<void>[] = [];
 
   result.data.forEach((row: any) => {
     let relationName: string = row[`Tables_in_${conversion._mySqlDbName}`];
@@ -127,9 +111,6 @@ export default async (conversion: Conversion): Promise<Conversion> => {
         arrTableColumns: [],
       });
 
-      processTablePromises.push(
-        processTableBeforeDataLoading(conversion, relationName, haveTablesLoaded),
-      );
       tablesCnt++;
     } else if (row.Table_type === 'VIEW') {
       conversion._viewsToMigrate.push(relationName);
@@ -142,7 +123,5 @@ export default async (conversion: Conversion): Promise<Conversion> => {
         \t--[${logTitle}] Views to migrate: ${viewsCnt}`;
 
   await log(conversion, message);
-  await Promise.all(processTablePromises);
-  await migrationStateManager.set(conversion, 'tables_loaded');
   return conversion;
 };
