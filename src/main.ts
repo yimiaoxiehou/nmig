@@ -90,46 +90,6 @@ const processTableBeforeDataLoading = async (
 };
 
 /**
- * Main flow orchestrates per-table concurrent subtasks.
- */
-const runTableSubtasks = async (conversion: Conversion): Promise<Conversion> => {
-  const haveTablesLoaded: boolean = await migrationStateManager.get(conversion, 'tables_loaded');
-
-  if (conversion._tablesToMigrate.length === 0) {
-    await migrationStateManager.set(conversion, 'tables_loaded');
-    return conversion;
-  }
-
-  const workersCnt = getTableSubtasksConcurrency(conversion);
-  await log(
-    conversion,
-    `\t--[Main::runTableSubtasks] Running per-table subtasks with concurrency: ${workersCnt}`,
-  );
-
-  const queue: string[] = [...conversion._tablesToMigrate];
-  const worker = async (): Promise<void> => {
-    while (queue.length !== 0) {
-      const tableName: string | undefined = queue.shift();
-
-      if (!tableName) {
-        return;
-      }
-
-      await processTableBeforeDataLoading(conversion, tableName, haveTablesLoaded);
-    }
-  };
-
-  const workers: Promise<void>[] = [];
-  for (let i = 0; i < workersCnt; ++i) {
-    workers.push(worker());
-  }
-
-  await Promise.all(workers);
-  await migrationStateManager.set(conversion, 'tables_loaded');
-  return conversion;
-};
-
-/**
  * Runs NMIG migration pipeline in a sequential and explicit way.
  */
 const runMigration = async (): Promise<void> => {
@@ -141,7 +101,40 @@ const runMigration = async (): Promise<void> => {
     conversion = await createStateLogsTable(conversion);
     conversion = await createDataPoolTable(conversion);
     conversion = await loadStructureToMigrate(conversion);
-    conversion = await runTableSubtasks(conversion);
+
+    // Explicit per-table stage (managed by main.ts):
+    // for each table execute "createTable + prepareDataChunks" with bounded concurrency.
+    const haveTablesLoaded: boolean = await migrationStateManager.get(conversion, 'tables_loaded');
+
+    if (conversion._tablesToMigrate.length !== 0) {
+      const workersCnt = getTableSubtasksConcurrency(conversion);
+      await log(
+        conversion,
+        `	--[Main] Running per-table subtasks with concurrency: ${workersCnt}`,
+      );
+
+      const queue: string[] = [...conversion._tablesToMigrate];
+      const worker = async (): Promise<void> => {
+        while (queue.length !== 0) {
+          const tableName: string | undefined = queue.shift();
+
+          if (!tableName) {
+            return;
+          }
+
+          await processTableBeforeDataLoading(conversion, tableName, haveTablesLoaded);
+        }
+      };
+
+      const workers: Promise<void>[] = [];
+      for (let i = 0; i < workersCnt; ++i) {
+        workers.push(worker());
+      }
+
+      await Promise.all(workers);
+    }
+
+    await migrationStateManager.set(conversion, 'tables_loaded');
     conversion = await readDataPool(conversion);
     conversion = await DataPipeManager.runDataPipe(conversion);
     conversion = await decodeBinaryData(conversion);
