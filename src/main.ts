@@ -39,22 +39,41 @@ import {
 
 const { confPath, logsPath } = getConfAndLogsPaths();
 
-readConfig(confPath, logsPath)
-  .then(config => readExtraConfig(config, confPath))
-  .then(Conversion.initializeConversion)
-  .then(createLogsDirectory)
-  .then(readDataAndIndexTypesMap)
-  .then(boot)
-  .then(createSchema)
-  .then(createStateLogsTable)
-  .then(createDataPoolTable)
-  .then(loadStructureToMigrate)
-  .then(readDataPool)
-  .then(DataPipeManager.runDataPipe)
-  .then(decodeBinaryData)
-  .then(processConstraints)
-  .then(dropDataPoolTable)
-  .then(dropStateLogsTable)
-  .then(DbAccess.closeConnectionPools)
-  .then(generateReport)
-  .catch((error: Error) => console.log(`\t--[Main] error: ${error}`));
+/**
+ * Loads configuration and prepares Conversion instance.
+ */
+const initializeConversion = async (): Promise<Conversion> => {
+  const config = await readConfig(confPath, logsPath);
+  const configWithExtras = await readExtraConfig(config, confPath);
+  const conversion = await Conversion.initializeConversion(configWithExtras);
+  await createLogsDirectory(conversion);
+  await readDataAndIndexTypesMap(conversion);
+  return conversion;
+};
+
+/**
+ * Runs NMIG migration pipeline in a sequential and explicit way.
+ */
+const runMigration = async (): Promise<void> => {
+  try {
+    let conversion: Conversion = await initializeConversion();
+
+    conversion = await boot(conversion);
+    conversion = await createSchema(conversion);
+    conversion = await createStateLogsTable(conversion);
+    conversion = await createDataPoolTable(conversion);
+    conversion = await loadStructureToMigrate(conversion);
+    conversion = await readDataPool(conversion);
+    conversion = await DataPipeManager.runDataPipe(conversion);
+    conversion = await decodeBinaryData(conversion);
+    conversion = await processConstraints(conversion);
+    conversion = await dropDataPoolTable(conversion);
+    conversion = await dropStateLogsTable(conversion);
+    conversion = await DbAccess.closeConnectionPools(conversion);
+    await generateReport(conversion);
+  } catch (error) {
+    console.log(`\t--[Main] error: ${error}`);
+  }
+};
+
+void runMigration();
