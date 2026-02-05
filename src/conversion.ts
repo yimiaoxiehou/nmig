@@ -224,6 +224,11 @@ export default class Conversion {
   public readonly _numberOfSimultaneouslyRunningReaderProcesses: string | number;
 
   /**
+   * Number of per-table subtasks that will run simultaneously.
+   */
+  public readonly _numberOfSimultaneouslyRunningTableSubtasks: string | number;
+
+  /**
    * Logger is implemented as a child process.
    * Note, here we hold only a reference to the logger process.
    */
@@ -287,6 +292,12 @@ export default class Conversion {
       this._config.number_of_simultaneously_running_loader_processes,
     )
       ? +this._config.number_of_simultaneously_running_loader_processes
+      : 'DEFAULT';
+
+    this._numberOfSimultaneouslyRunningTableSubtasks = Conversion._isIntNumeric(
+      this._config.number_of_simultaneously_running_table_subtasks,
+    )
+      ? +this._config.number_of_simultaneously_running_table_subtasks
       : 'DEFAULT';
 
     this._readerMaxOldSpaceSize = Conversion._isIntNumeric(this._config.loader_max_old_space_size)
