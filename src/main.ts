@@ -84,9 +84,8 @@ const processTableBeforeDataLoading = async (
   conversion: Conversion,
   tableName: string,
   haveDataChunksProcessed: boolean,
-  skipPgTableCreation: boolean,
 ): Promise<void> => {
-  await createTable(conversion, tableName, skipPgTableCreation);
+  await createTable(conversion, tableName);
   await prepareDataChunks(conversion, tableName, haveDataChunksProcessed);
 };
 
@@ -108,8 +107,6 @@ const runMigration = async (): Promise<void> => {
     const haveTablesLoaded: boolean = await migrationStateManager.get(conversion, 'tables_loaded');
     const dataPoolTableNotEmpty: boolean = await isDataPoolTableNotEmpty(conversion);
     const haveDataChunksProcessed: boolean = haveTablesLoaded || dataPoolTableNotEmpty;
-    const skipPgTableCreation: boolean = dataPoolTableNotEmpty;
-
     if (dataPoolTableNotEmpty) {
       await log(
         conversion,
@@ -117,7 +114,7 @@ const runMigration = async (): Promise<void> => {
       );
     }
 
-    if (conversion._tablesToMigrate.length !== 0) {
+    if (!dataPoolTableNotEmpty && conversion._tablesToMigrate.length !== 0) {
       const workersCnt = getTableSubtasksConcurrency(conversion);
       await log(
         conversion,
@@ -137,7 +134,6 @@ const runMigration = async (): Promise<void> => {
             conversion,
             tableName,
             haveDataChunksProcessed,
-            skipPgTableCreation,
           );
         }
       };
