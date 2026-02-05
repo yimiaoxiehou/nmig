@@ -75,7 +75,7 @@ const getSanitizedType = (type: string): string => type.split('(')[0];
  * Arranges columns data before loading.
  */
 export default (arrTableColumns: any[], mysqlVersion: number, encoding: Encoding): string => {
-  let strRetVal = '';
+  const arrangedColumns: string[] = [];
   const wkbFunc = mysqlVersion >= 5.76 ? 'ST_AsWKB' : 'AsWKB';
 
   arrTableColumns.forEach((column: any) => {
@@ -84,21 +84,23 @@ export default (arrTableColumns: any[], mysqlVersion: number, encoding: Encoding
 
     if (isSpacial(type)) {
       // Apply HEX(ST_AsWKB(...)) due to the issue, described at https://bugs.mysql.com/bug.php?id=69798
-      strRetVal += `HEX(${wkbFunc}(\`${field}\`)) AS \`${field}\`,`;
+      arrangedColumns.push(`HEX(${wkbFunc}(\`${field}\`)) AS \`${field}\``);
     } else if (isBinary(type)) {
-      strRetVal += `HEX(\`${field}\`) AS \`${field}\`,`;
+      arrangedColumns.push(`HEX(\`${field}\`) AS \`${field}\``);
     } else if (isBit(type)) {
-      strRetVal += `BIN(\`${field}\`) AS \`${field}\`,`;
+      arrangedColumns.push(`BIN(\`${field}\`) AS \`${field}\``);
     } else if (isDateTime(type)) {
-      strRetVal += `IF(\`${field}\` IN('0000-00-00', '0000-00-00 00:00:00'), '-INFINITY', CAST(\`${field}\` AS CHAR)) AS \`${field}\`,`;
+      arrangedColumns.push(
+        `IF(\`${field}\` IN('0000-00-00', '0000-00-00 00:00:00'), '-INFINITY', CAST(\`${field}\` AS CHAR)) AS \`${field}\``,
+      );
     } else if (isNumeric(type)) {
-      strRetVal += `\`${field}\` AS \`${field}\`,`;
+      arrangedColumns.push(`\`${field}\` AS \`${field}\``);
     } else if (encoding === 'utf-8' || encoding === 'utf8') {
-      strRetVal += `REPLACE(\`${field}\`, '\0', '') AS \`${field}\`,`;
+      arrangedColumns.push(`REPLACE(\`${field}\`, '\0', '') AS \`${field}\``);
     } else {
-      strRetVal += `\`${field}\` AS \`${field}\`,`;
+      arrangedColumns.push(`\`${field}\` AS \`${field}\``);
     }
   });
 
-  return strRetVal.slice(0, -1);
+  return arrangedColumns.join(',');
 };
