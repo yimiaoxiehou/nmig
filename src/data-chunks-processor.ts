@@ -72,6 +72,7 @@ export default async (
     _tableName: tableName,
     _rowsCnt: rowsCnt,
     _selectFieldList: selectFieldList,
+    _sourceColumnNames: arrTableColumns.map((column: any): string => column.Field),
     _copyColumnNamesList: arrTableColumns
       .map((column: any): string => {
         const columnName = extraConfigProcessor.getColumnName(
