@@ -72,6 +72,49 @@ process.on('message', async (signal: MessageToDataReader): Promise<void> => {
 /**
  * Initializes data transfer for the table, related to given "chunk".
  */
+
+/**
+ * Attaches periodic progress logging for streaming data transfer.
+ */
+const attachProgressLogger = (
+  conv: Conversion,
+  tableName: string,
+  rowsCnt: number,
+  dataReaderStream: Readable,
+): void => {
+  if (rowsCnt <= 0) {
+    return;
+  }
+
+  const minRowsPerProgressLog = 50000;
+  const percentStep = 5;
+  const rowsPerPercentStep = Math.floor(rowsCnt / (100 / percentStep));
+  const logStep = Math.max(minRowsPerProgressLog, rowsPerPercentStep, 1);
+
+  let processedRows = 0;
+  let nextLogAt = logStep;
+
+  void log(
+    conv,
+    `	--[NMIG loadData] Progress for "${conv._schema}"."${tableName}": 0/${rowsCnt} rows (0%)`,
+  );
+
+  dataReaderStream.on('data', (): void => {
+    processedRows++;
+
+    if (processedRows < nextLogAt) {
+      return;
+    }
+
+    const progress = Math.min(100, Math.floor((processedRows * 100) / rowsCnt));
+    nextLogAt += logStep;
+    void log(
+      conv,
+      `	--[NMIG loadData] Progress for "${conv._schema}"."${tableName}": ${processedRows}/${rowsCnt} rows (${progress}%)`,
+    );
+  });
+};
+
 const populateTable = async (conv: Conversion, chunk: any): Promise<void> => {
   const tableName: string = chunk._tableName;
   const strSelectFieldList: string = chunk._selectFieldList;
@@ -118,6 +161,8 @@ const populateTable = async (conv: Conversion, chunk: any): Promise<void> => {
   const dataReaderStream: Readable = mysqlClient
     .query(sql)
     .stream({ highWaterMark: conv._streamsHighWaterMark });
+
+  attachProgressLogger(conv, tableName, rowsCnt, dataReaderStream);
 
   try {
     await streamPromises.pipeline(dataReaderStream, json2csvStream, dataWriter.stdin as Writable);
