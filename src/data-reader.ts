@@ -82,36 +82,43 @@ const attachProgressLogger = (
   rowsCnt: number,
   dataReaderStream: Readable,
 ): void => {
-  if (rowsCnt <= 0) {
-    return;
-  }
-
-  const minRowsPerProgressLog = 50000;
-  const percentStep = 5;
-  const rowsPerPercentStep = Math.floor(rowsCnt / (100 / percentStep));
-  const logStep = Math.max(minRowsPerProgressLog, rowsPerPercentStep, 1);
-
   let processedRows = 0;
-  let nextLogAt = logStep;
+  let timer: NodeJS.Timeout | null = null;
+  let timerDelay: NodeJS.Timeout | null = null;
 
-  void log(
-    conv,
-    `	--[NMIG loadData] Progress for "${conv._schema}"."${tableName}": 0/${rowsCnt} rows (0%)`,
-  );
-
-  dataReaderStream.on('data', (): void => {
-    processedRows++;
-
-    if (processedRows < nextLogAt) {
-      return;
-    }
-
-    const progress = Math.min(100, Math.floor((processedRows * 100) / rowsCnt));
-    nextLogAt += logStep;
+  const logProgress = (): void => {
+    const progress = rowsCnt > 0 ? Math.min(100, Math.floor((processedRows * 100) / rowsCnt)) : 0;
     void log(
       conv,
       `	--[NMIG loadData] Progress for "${conv._schema}"."${tableName}": ${processedRows}/${rowsCnt} rows (${progress}%)`,
     );
+  };
+
+  const clearProgressTimer = (): void => {
+    if (timerDelay !== null) {
+      clearTimeout(timerDelay);
+      timerDelay = null;
+    }
+
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  dataReaderStream.once('end', clearProgressTimer);
+  dataReaderStream.once('close', clearProgressTimer);
+  dataReaderStream.once('error', clearProgressTimer);
+
+  timerDelay = setTimeout((): void => {
+    logProgress();
+    timer = setInterval(logProgress, 5000);
+    timer.unref();
+  }, 30000);
+  timerDelay.unref();
+
+  dataReaderStream.on('data', (): void => {
+    processedRows++;
   });
 };
 
