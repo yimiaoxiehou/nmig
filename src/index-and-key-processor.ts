@@ -80,6 +80,27 @@ export default async (conversion: Conversion, tableName: string): Promise<void> 
     const currentIndex: Index = pgIndices.get(index) as Index;
 
     if (index.toLowerCase() === 'primary') {
+      const pkCheckParams: DBAccessQueryParams = {
+        ...params,
+        vendor: DBVendors.PG,
+        processExitOnError: false,
+        shouldReturnClient: false,
+        sql: `SELECT 1
+            FROM information_schema.table_constraints
+            WHERE table_schema = $1
+              AND table_name = $2
+              AND constraint_type = 'PRIMARY KEY';`,
+        bindings: [conversion._schema, tableName],
+      };
+      const pkCheckResult: DBAccessQueryResult = await DbAccess.query(pkCheckParams);
+      if (!pkCheckResult.error && pkCheckResult.data.length > 0) {
+        await log(
+          conversion,
+          `\t--[${logTitle}] "${conversion._schema}"."${tableName}": primary key already exists, skipping...`,
+          (conversion._dicTables.get(tableName) as Table).tableLogPath,
+        );
+        return;
+      }
       sqlAddIndex = `ALTER TABLE "${conversion._schema}"."${tableName}" 
                 ADD PRIMARY KEY(${currentIndex.column_name.join(',')});`;
     } else {
