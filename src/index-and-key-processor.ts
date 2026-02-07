@@ -89,7 +89,7 @@ export default async (conversion: Conversion, tableName: string): Promise<void> 
 
       const indexName: string = getUniqueIdentifier(`${tableName}_${columnName}_idx`, '_idx');
 
-      sqlAddIndex = `CREATE ${currentIndex.is_unique ? 'UNIQUE' : ''} INDEX "${indexName}" 
+      sqlAddIndex = `CREATE ${currentIndex.is_unique ? 'UNIQUE' : ''} INDEX IF NOT EXISTS "${indexName}" 
             ON "${conversion._schema}"."${tableName}" 
             ${currentIndex.index_type} (${currentIndex.column_name.join(',')});`;
     }

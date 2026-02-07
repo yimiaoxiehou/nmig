@@ -62,7 +62,7 @@ export default async (conversion: Conversion): Promise<Conversion> => {
     const tableName: string = row.table_name;
     const columnName: string = row.column_name;
     params.sql = `UPDATE ${conversion._schema}."${tableName}"
-                SET "${columnName}" = DECODE(ENCODE("${columnName}", 'escape'), 'hex');`;
+                SET "${columnName}" = DECODE(ENCODE("${columnName}", 'escape'), 'escape');`;
 
     await DbAccess.query(params);
   };
